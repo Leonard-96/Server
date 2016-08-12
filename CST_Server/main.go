@@ -20,11 +20,14 @@ const (
 	msg_length = 2 * 1024
 )
 
-var msg = &DataFrame.Msg{}
-var send_msg = &DataFrame.Msg{}
 var socketMap = make(map[int]net.Conn)
-var char_msg = &data.Message{}
-var msgIndex = 0
+
+type ClientSrc struct {
+	msg      *DataFrame.Msg
+	send_msg *DataFrame.Msg
+	char_msg *data.Message
+	msgIndex int
+}
 
 func main() {
 	log.Println("start to listen...")
@@ -41,37 +44,43 @@ func main() {
 			continue
 		}
 		log.Println("connected from " + conn.RemoteAddr().String())
-		go handleConn(conn)
+		client_src := &ClientSrc{
+			msg:      &DataFrame.Msg{},
+			send_msg: &DataFrame.Msg{},
+			char_msg: &data.Message{},
+			msgIndex: 0,
+		}
+		go handleConn(conn, client_src)
 	}
 }
 
-func handleConn(conn net.Conn) {
+func handleConn(conn net.Conn, this *ClientSrc) {
 	data := make([]byte, msg_length)
 	for {
 		n, err := conn.Read(data)
-		err = proto.Unmarshal(data[0:n], msg)
+		err = proto.Unmarshal(data[0:n], this.msg)
 		if err != nil {
 			fmt.Println("unmarshaling error: ", err)
 		}
-		switch msg.UserOpt {
+		switch this.msg.UserOpt {
 		case OptUtil.REQUEST_LOGIN:
-			handleLogin(conn)
+			this.handleLogin(conn)
 			break
 		case OptUtil.REQUEST_GET_FRIENDS:
-			handleGetFriend(conn)
+			this.handleGetFriend(conn)
 			break
 		case OptUtil.REQUEST_SEND_TXT:
-			handleSendText(conn)
+			this.handleSendText(conn)
 			break
 		}
 	}
-	fmt.Println("msg:", msg)
+	fmt.Println("msg:", this.msg)
 	defer conn.Close()
 }
 
-func handleLogin(conn net.Conn) {
-	username := msg.User.UesrName
-	password := msg.User.UserPwd
+func (this *ClientSrc) handleLogin(conn net.Conn) {
+	username := this.msg.User.UesrName
+	password := this.msg.User.UserPwd
 	fmt.Println("username:" + username)
 	fmt.Println("password:" + password)
 	var userdata = &data.User{}
@@ -81,7 +90,7 @@ func handleLogin(conn net.Conn) {
 	}
 	if userdata.UserId != 0 {
 		fmt.Println("send success...")
-		send_msg = &DataFrame.Msg{
+		this.send_msg = &DataFrame.Msg{
 			UserOpt:       OptUtil.RESULT_LOGIN,
 			OptResult:     true,
 			ReceiveResult: "Success",
@@ -93,15 +102,15 @@ func handleLogin(conn net.Conn) {
 		}
 	} else {
 		fmt.Println("send faild...")
-		send_msg = &DataFrame.Msg{
+		this.send_msg = &DataFrame.Msg{
 			UserOpt:       OptUtil.RESULT_LOGIN,
 			OptResult:     false,
 			ReceiveResult: "UserName or Password Eorro..",
 		}
 	}
 	socketMap[userdata.UserId] = conn
-	data, err := proto.Marshal(send_msg)
-	fmt.Println("Marshal:", send_msg)
+	data, err := proto.Marshal(this.send_msg)
+	fmt.Println("Marshal:", this.send_msg)
 	if err != nil {
 		fmt.Println("marshaling error: ", err)
 	}
@@ -109,8 +118,8 @@ func handleLogin(conn net.Conn) {
 	fmt.Println("Write data....", data)
 }
 
-func handleGetFriend(conn net.Conn) {
-	useId := int(msg.User.UserID)
+func (this *ClientSrc) handleGetFriend(conn net.Conn) {
+	useId := int(this.msg.User.UserID)
 	fmt.Println("recive userid:", useId)
 	var friendMap = make(map[int]data.User)
 	var index int
@@ -130,39 +139,40 @@ func handleGetFriend(conn net.Conn) {
 			friendlist[listIndex] = friends
 			listIndex++
 		}
-		send_msg = &DataFrame.Msg{
+		this.send_msg = &DataFrame.Msg{
 			UserOpt:       OptUtil.RESULT_GET_FRIEND,
 			OptResult:     true,
 			ReceiveResult: "Success",
 			Friends:       friendlist,
 		}
 
-		data, err := proto.Marshal(send_msg)
-		fmt.Println("Marshal:", send_msg)
+		data, err := proto.Marshal(this.send_msg)
+		fmt.Println("Marshal:", this.send_msg)
 		if err != nil {
 			fmt.Println("marshaling error: ", err)
 		}
 		conn.Write(data)
-		fmt.Println("friend send_msg:", send_msg)
+		fmt.Println("friend send_msg:", this.send_msg)
 	}
 }
 
-func handleSendText(conn net.Conn) {
-	char_msg.ReciverID = int(msg.PersonalMsg[msgIndex].RecverID)
-	char_msg.SenderID = int(msg.PersonalMsg[msgIndex].SenderID)
-	char_msg.Content = msg.PersonalMsg[msgIndex].Content
-	char_msg.Time = msg.PersonalMsg[msgIndex].SendTime
-	char_msg.DataType = int(OptUtil.MESSAGE_TYPE_TXT)
-	fmt.Println("handleSendText:", char_msg)
-	_, ok := socketMap[char_msg.ReciverID]
+func (this *ClientSrc) handleSendText(conn net.Conn) {
+	index := this.msgIndex
+	this.char_msg.ReciverID = int(this.msg.PersonalMsg[index].RecverID)
+	this.char_msg.SenderID = int(this.msg.PersonalMsg[index].SenderID)
+	this.char_msg.Content = this.msg.PersonalMsg[index].Content
+	this.char_msg.Time = this.msg.PersonalMsg[index].SendTime
+	this.char_msg.DataType = int(OptUtil.MESSAGE_TYPE_TXT)
+	fmt.Println("handleSendText:", this.char_msg)
+	_, ok := socketMap[this.char_msg.ReciverID]
 	if ok {
 		//在线
 	} else {
 
-		DbUitl.SaveMessage(char_msg)
-		fmt.Println("用户" + strconv.Itoa(char_msg.ReciverID) + "不在线，先把消息暂存在服务器端")
+		DbUitl.SaveMessage(this.char_msg)
+		fmt.Println("用户" + strconv.Itoa(this.char_msg.ReciverID) + "不在线，先把消息暂存在服务器端")
 	}
-	msgIndex++
+	this.msgIndex++
 }
 
 func BytesToInt(b []byte) int {
