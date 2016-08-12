@@ -2,7 +2,7 @@
 package DbUitl
 
 import (
-	"data"
+	"Server/data"
 	"database/sql"
 	"fmt"
 	"strconv"
