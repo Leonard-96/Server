@@ -3,7 +3,6 @@ package FIFOQueue
 
 import (
 	"container/list"
-	"fmt"
 	"reflect"
 )
 
@@ -37,6 +36,10 @@ func (q *Queue) Dequeue() *list.Element {
 	q.list.Remove(e)
 	<-q.sem
 	return e
+}
+
+func (q *Queue) IsEmpty() bool {
+	return q.list.Len() == 0
 }
 
 func (q *Queue) Query(queryFunc interface{}) *list.Element {

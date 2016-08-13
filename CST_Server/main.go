@@ -3,6 +3,7 @@ package main
 
 import (
 	"Server/DbUitl"
+	"Server/FIFOQueue"
 	"Server/MyProbuf"
 	"Server/OptUtil"
 	"Server/data"
@@ -72,6 +73,10 @@ func handleConn(conn net.Conn, this *ClientSrc) {
 		case OptUtil.REQUEST_SEND_TXT:
 			this.handleSendText(conn)
 			break
+		case OptUtil.REQUEST_GET_OFFLINE_MSG:
+			this.handleGetOffLineMsg(conn)
+			break
+
 		}
 	}
 	fmt.Println("msg:", this.msg)
@@ -83,7 +88,7 @@ func (this *ClientSrc) handleLogin(conn net.Conn) {
 	password := this.msg.User.UserPwd
 	fmt.Println("username:" + username)
 	fmt.Println("password:" + password)
-	var userdata = &data.User{}
+	var userdata = data.User{}
 	if username != "" && password != "" {
 		userdata = DbUitl.Login(username, password)
 		fmt.Println("Server:", userdata)
@@ -121,13 +126,13 @@ func (this *ClientSrc) handleLogin(conn net.Conn) {
 func (this *ClientSrc) handleGetFriend(conn net.Conn) {
 	useId := int(this.msg.User.UserID)
 	fmt.Println("recive userid:", useId)
-	var friendMap = make(map[int]data.User)
+	friendMap := make(map[int]data.User)
 	var index int
 	if useId != 0 {
 		index, friendMap = DbUitl.GetFriends(strconv.Itoa(useId))
 		fmt.Println("friendMap:", friendMap)
 	}
-	var friendlist []*DataFrame.User = make([]*DataFrame.User, index)
+	friendlist := make([]*DataFrame.User, index)
 	if friendMap != nil {
 		var listIndex int = 0
 		for _, value := range friendMap {
@@ -145,15 +150,21 @@ func (this *ClientSrc) handleGetFriend(conn net.Conn) {
 			ReceiveResult: "Success",
 			Friends:       friendlist,
 		}
-
-		data, err := proto.Marshal(this.send_msg)
-		fmt.Println("Marshal:", this.send_msg)
-		if err != nil {
-			fmt.Println("marshaling error: ", err)
+	} else {
+		this.send_msg = &DataFrame.Msg{
+			UserOpt:       OptUtil.RESULT_GET_FRIEND,
+			OptResult:     false,
+			ReceiveResult: "get friends fail...",
 		}
-		conn.Write(data)
-		fmt.Println("friend send_msg:", this.send_msg)
 	}
+	data, err := proto.Marshal(this.send_msg)
+	fmt.Println("Marshal:", this.send_msg)
+	if err != nil {
+		fmt.Println("marshaling error: ", err)
+	}
+	conn.Write(data)
+	fmt.Println("friend send_msg:", this.send_msg)
+
 }
 
 func (this *ClientSrc) handleSendText(conn net.Conn) {
@@ -168,11 +179,52 @@ func (this *ClientSrc) handleSendText(conn net.Conn) {
 	if ok {
 		//在线
 	} else {
-
 		DbUitl.SaveMessage(this.char_msg)
 		fmt.Println("用户" + strconv.Itoa(this.char_msg.ReciverID) + "不在线，先把消息暂存在服务器端")
 	}
 	this.msgIndex++
+}
+
+func (this *ClientSrc) handleGetOffLineMsg(conn net.Conn) {
+	fmt.Println("handleGetOffLineMsg()....")
+	userId := int(this.msg.User.UserID)
+	msgQueue := new(FIFOQueue.Queue)
+	if userId != 0 {
+		msgQueue = DbUitl.GetOffLineMsg(strconv.Itoa(userId))
+	}
+	size := msgQueue.Size()
+	fmt.Println("msgQueue size:", size)
+	msgList := make([]*DataFrame.PersonalMsg, size)
+	var listIndex int = 0
+	if msgQueue.Size() != 0 {
+		for msgQueue.Size() > 0 {
+			msg_data := msgQueue.Dequeue().Value.(*DataFrame.PersonalMsg)
+			fmt.Println(msg_data)
+			msgList[listIndex] = msg_data
+			listIndex++
+		}
+		this.send_msg = &DataFrame.Msg{
+			UserOpt:       OptUtil.RESULT_GET_OFFLINE_MSG,
+			OptResult:     true,
+			ReceiveResult: "Success",
+			PersonalMsg:   msgList,
+		}
+	} else {
+		this.send_msg = &DataFrame.Msg{
+			UserOpt:       OptUtil.RESULT_GET_OFFLINE_MSG,
+			OptResult:     false,
+			ReceiveResult: "get offline message fail...",
+		}
+	}
+
+	data, err := proto.Marshal(this.send_msg)
+	fmt.Println("Marshal:", this.send_msg)
+	if err != nil {
+		fmt.Println("marshaling error: ", err)
+	}
+	conn.Write(data)
+	fmt.Println("handleGetOffline send_msg:", this.send_msg)
+
 }
 
 func BytesToInt(b []byte) int {
