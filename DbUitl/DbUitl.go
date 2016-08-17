@@ -75,6 +75,18 @@ func GetOffLineMsg(receverID string) *FIFOQueue.Queue {
 	return queue
 }
 
+func DeleteMessage(receverID string) {
+	sql := "delete from message where receverId='" + receverID + "'"
+	_, err := db.Exec(sql)
+	checkError(err)
+}
+
+func Close() {
+	if db != nil {
+		db.Close()
+	}
+}
+
 func checkError(err error) {
 	if err != nil {
 		fmt.Println("DbUitl err:", err)
